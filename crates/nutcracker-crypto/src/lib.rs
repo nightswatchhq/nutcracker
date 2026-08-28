@@ -28,4 +28,4 @@ pub mod blind_index;
 pub mod envelope;
 
 pub use blind_index::{BlindIndex, BucketToken, IndexParams};
-pub use envelope::{ContentKey, EnvelopeError, NamespaceKey, RootKey, SealedItem};
+pub use envelope::{ContentKey, EnvelopeError, NamespaceHandle, NamespaceKey, RootKey, SealedItem};

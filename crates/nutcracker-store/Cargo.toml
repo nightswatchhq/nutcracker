@@ -1,0 +1,13 @@
+[package]
+name = "nutcracker-store"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "The provider-side store for nutcracker: opaque ciphertext keyed by namespace handle, searched by bucket token. Holds no plaintext and no keys."
+
+[dependencies]
+nutcracker-crypto = { path = "../nutcracker-crypto" }
+thiserror = "2"
+
+[dev-dependencies]
+rand = "0.8"

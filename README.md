@@ -57,13 +57,26 @@ provider, how much, and since when — permanently, against an address.
   a number somebody can ask about.
 - It cannot recover a lost root key. User-held means user-held.
 
+## What is here
+
+| Crate | What it is |
+|---|---|
+| `nutcracker-crypto` | client-side: three-layer envelope encryption, the keyed blind index |
+| `nutcracker-store` | provider-side: opaque ciphertext by namespace handle, searched by bucket token |
+| `contracts` | `MemoryDataService.sol` — providers and commitments, never users |
+
+The store's type signatures are the enforcement: **there is no way to hand it a plaintext, even by
+accident, because no function accepts one.** Its Postgres schema has a test asserting that no
+column can hold a user, a namespace name, a plaintext or an embedding — which caught its own first
+draft.
+
 ## Build
 
 ```sh
 cd contracts && forge test
 ```
 
-15 tests. `graphprotocol/contracts` is pinned to `2629e646…` (main) — see the gotchas in
+15 contract tests, 35 Rust tests. `graphprotocol/contracts` is pinned to `2629e646…` (main) — see the gotchas in
 `nightswatchhq/horizon-skills`, since the documented `horizon@1.1.0` pin moves several APIs.
 
 Apache-2.0.

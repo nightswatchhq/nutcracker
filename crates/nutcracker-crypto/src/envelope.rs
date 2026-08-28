@@ -115,6 +115,37 @@ impl RootKey {
     }
 }
 
+/// The opaque handle a provider uses to group one namespace's items.
+///
+/// The provider needs *something* to group by, or it cannot serve a namespace at all. It must not
+/// be the namespace name, which would tell it what the memory is about, and it must not be derived
+/// from the namespace *key*, which rotates — a rotating handle would orphan every stored item on
+/// revocation.
+///
+/// So: derived from the root key and the name, stable across generations. The provider learns that
+/// a set of items belong together, which is unavoidable, and nothing else.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NamespaceHandle(pub [u8; 16]);
+
+impl NamespaceHandle {
+    pub fn to_hex(&self) -> String {
+        self.0.iter().map(|b| format!("{b:02x}")).collect()
+    }
+}
+
+impl RootKey {
+    /// Stable across key rotations, by construction. See [`NamespaceHandle`].
+    pub fn namespace_handle(&self, namespace: &str) -> NamespaceHandle {
+        let mut info = Vec::with_capacity(namespace.len() + 24);
+        info.extend_from_slice(b"nutcracker:handle:v1:");
+        info.extend_from_slice(namespace.as_bytes());
+        let full = derive(&self.0, &info);
+        let mut h = [0u8; 16];
+        h.copy_from_slice(&full[..16]);
+        NamespaceHandle(h)
+    }
+}
+
 impl NamespaceKey {
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
@@ -294,6 +325,36 @@ mod tests {
             ns.open("item-1", &sealed),
             Err(EnvelopeError::Decrypt)
         ));
+    }
+
+    /// The handle must survive rotation, or revoking an agent orphans every stored item.
+    #[test]
+    fn the_namespace_handle_is_stable_across_key_rotations() {
+        let r = root();
+        assert_eq!(r.namespace_handle("notes"), r.namespace_handle("notes"));
+        // Rotating the key changes the key...
+        assert_ne!(
+            r.namespace_key("notes", 0).as_bytes(),
+            r.namespace_key("notes", 1).as_bytes()
+        );
+        // ...and deliberately does not change the handle.
+        assert_eq!(r.namespace_handle("notes"), r.namespace_handle("notes"));
+    }
+
+    #[test]
+    fn handles_differ_per_namespace_and_per_user() {
+        let a = root();
+        let b = RootKey::from_bytes([8u8; 32]);
+        assert_ne!(a.namespace_handle("notes"), a.namespace_handle("other"));
+        assert_ne!(a.namespace_handle("notes"), b.namespace_handle("notes"));
+    }
+
+    /// It is a keyed derivation, not a hash of the name: two users with a namespace called "notes"
+    /// must not share a handle, or the provider can bucket users by what they call things.
+    #[test]
+    fn the_handle_does_not_leak_the_namespace_name() {
+        let h = root().namespace_handle("medical-records");
+        assert!(!h.to_hex().contains("6d65646963616c"));
     }
 
     #[test]
