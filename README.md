@@ -63,6 +63,7 @@ provider, how much, and since when — permanently, against an address.
 |---|---|
 | `nutcracker-crypto` | client-side: three-layer envelope encryption, the keyed blind index |
 | `nutcracker-store` | provider-side: opaque ciphertext by namespace handle, searched by bucket token |
+| `nutcracker-agent` | the **local** MCP shim: holds the root key, seals before anything leaves the machine |
 | `contracts` | `MemoryDataService.sol` — providers and commitments, never users |
 
 The store's type signatures are the enforcement: **there is no way to hand it a plaintext, even by
@@ -70,13 +71,31 @@ accident, because no function accepts one.** Its Postgres schema has a test asse
 column can hold a user, a namespace name, a plaintext or an embedding — which caught its own first
 draft.
 
+## The MCP server is local, and that is not a detail
+
+compass runs its MCP server at the provider, because subgraph data is public. Copying that here
+cannot be end-to-end encrypted, and the reason is worth saying slowly: if the agent talks MCP
+straight to the provider, then either it sends plaintext and the provider has it, or the *agent*
+holds the root key. "The agent" means Claude, or Cursor, or whatever you are running next month.
+Handing a rotating cast of third-party clients the key that protects everything you have ever told
+any of them is not user-owned memory.
+
+```
+  agent  ──MCP, plaintext, localhost──▶  nutcracker-agent  ──HTTP, sealed──▶  provider
+                                         (holds the root key)                 (holds nothing)
+```
+
+The agent gets `memory.write("we chose postgres")`. The provider gets opaque bytes and bucket
+tokens. **Anything advertising itself as a remote agent-facing memory MCP server is holding your
+keys.**
+
 ## Build
 
 ```sh
 cd contracts && forge test
 ```
 
-15 contract tests, 35 Rust tests. `graphprotocol/contracts` is pinned to `2629e646…` (main) — see the gotchas in
+15 contract tests, 44 Rust tests. `graphprotocol/contracts` is pinned to `2629e646…` (main) — see the gotchas in
 `nightswatchhq/horizon-skills`, since the documented `horizon@1.1.0` pin moves several APIs.
 
 Apache-2.0.

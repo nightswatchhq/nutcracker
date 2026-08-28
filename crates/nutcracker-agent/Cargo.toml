@@ -1,0 +1,16 @@
+[package]
+name = "nutcracker-agent"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "The LOCAL MCP shim. Holds the user's root key, exposes ergonomic memory tools to an agent, and talks sealed payloads to a remote provider. The provider never sees plaintext and never sees a key."
+
+[dependencies]
+nutcracker-crypto = { path = "../nutcracker-crypto" }
+nutcracker-store = { path = "../nutcracker-store" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+rand = "0.8"
