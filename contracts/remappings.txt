@@ -1,0 +1,11 @@
+@graphprotocol/horizon/interfaces/=lib/contracts/packages/interfaces/contracts/horizon/
+@graphprotocol/horizon/data-service/=lib/contracts/packages/horizon/contracts/data-service/
+@graphprotocol/horizon/utilities/=lib/contracts/packages/horizon/contracts/utilities/
+@graphprotocol/horizon/libraries/=lib/contracts/packages/horizon/contracts/libraries/
+@graphprotocol/horizon/payments/=lib/contracts/packages/horizon/contracts/payments/
+@graphprotocol/horizon/staking/=lib/contracts/packages/horizon/contracts/staking/
+@graphprotocol/interfaces/=lib/contracts/packages/interfaces/
+@graphprotocol/contracts/=lib/contracts/packages/contracts/
+@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/
+@openzeppelin/contracts/=lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/
+forge-std/=lib/forge-std/src/
