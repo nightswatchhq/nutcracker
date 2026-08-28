@@ -63,6 +63,28 @@ toward B as you loosen it, which is the right shape for a knob.
 
 Costs: recall is approximate, the client does real work, and there is a second round trip.
 
+### Measured, not asserted
+
+`cargo run -p nutcracker-crypto --example leakage` prints the tradeoff. At the default
+8 bands x 8 bits, over 64-dimensional vectors:
+
+| perturbation | recall |
+|---|---|
+| 0.05 | 100% |
+| 0.20 | 100% |
+| 0.50 | 94% |
+| 0.80 | 73% |
+| 1.20 | 48% |
+
+**Read the bottom of that table.** Near-duplicate recall is easy and is not what anyone means by
+semantic search; a scheme that only retrieves near-identical items is a deduplicator. The default
+holds up well to moderate distance and falls off past it, and chasing the tail means loosening the
+parameters, which discloses more. That is the tradeoff, and these are its actual numbers rather
+than an adjective.
+
+False candidates at the default run around 3%: unrelated items returned for the client to decrypt
+and discard. Wasted bandwidth, not a correctness failure.
+
 ### What this implementation does
 
 **Default C. Offer A. Refuse to ship B silently.**

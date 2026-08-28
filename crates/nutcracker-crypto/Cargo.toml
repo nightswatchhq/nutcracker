@@ -1,0 +1,19 @@
+[package]
+name = "nutcracker-crypto"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Client-side envelope encryption and the keyed blind index for nutcracker. Standard primitives only: nothing here invents a construction."
+
+[dependencies]
+# Standard primitives, all RustCrypto. Nothing here is home-made, and nothing should be.
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
+rand_core = { version = "0.6", features = ["getrandom"] }
+zeroize = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+rand = "0.8"
