@@ -144,13 +144,16 @@ Payment is not wired into the provider. A real one fronts these handlers with th
 validation compass already implements and returns 402 without one; that belongs in front rather
 than half-built inside.
 
+Full setup, including keeping the provider running and pointing Claude Code at it:
+[`docs/install.md`](docs/install.md).
+
 ## Build
 
 ```sh
 cd contracts && forge test
 ```
 
-15 contract tests, 61 Rust tests. `graphprotocol/contracts` is pinned to `2629e646…` (main) — see the gotchas in
+15 contract tests, 65 Rust tests. `graphprotocol/contracts` is pinned to `2629e646…` (main) — see the gotchas in
 `nightswatchhq/horizon-skills`, since the documented `horizon@1.1.0` pin moves several APIs.
 
 Apache-2.0.
