@@ -45,7 +45,9 @@ use crate::envelope::NamespaceKey;
 type HmacSha256 = Hmac<Sha256>;
 
 /// An opaque bucket identifier. This is what actually goes to the provider.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct BucketToken(pub [u8; 16]);
 
 impl BucketToken {

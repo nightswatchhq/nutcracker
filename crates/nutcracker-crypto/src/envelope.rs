@@ -43,7 +43,7 @@ pub struct NamespaceKey([u8; 32]);
 pub struct ContentKey([u8; 32]);
 
 /// What the provider actually stores. Opaque to it in its entirety.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SealedItem {
     /// The item, under its content key.
     pub ciphertext: Vec<u8>,
@@ -124,7 +124,9 @@ impl RootKey {
 ///
 /// So: derived from the root key and the name, stable across generations. The provider learns that
 /// a set of items belong together, which is unavoidable, and nothing else.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct NamespaceHandle(pub [u8; 16]);
 
 impl NamespaceHandle {

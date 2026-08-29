@@ -8,6 +8,7 @@ description = "The provider-side store for nutcracker: opaque ciphertext keyed b
 [dependencies]
 nutcracker-crypto = { path = "../nutcracker-crypto" }
 thiserror = "2"
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 rand = "0.8"

@@ -187,3 +187,134 @@ async fn an_unrecognised_index_mode_is_treated_as_unsafe_not_as_blind() {
         "a typo in `mode` must fail closed"
     );
 }
+
+/// A provider that loses everything on restart is a demo. These pin the difference.
+mod persistence {
+    use super::*;
+    use nutcracker_provider::AppState;
+
+    fn tmpfile(name: &str) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "nutcracker-test-{name}-{}.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&p);
+        p
+    }
+
+    #[tokio::test]
+    async fn an_item_survives_a_restart() {
+        let path = tmpfile("survives");
+        let state = AppState::with_data(path.clone()).unwrap();
+        let (status, _) = call(
+            state,
+            post(
+                "/v1/items",
+                serde_json::json!({
+                    "namespace": NS, "item_id": "a", "sealed": SEALED(), "tokens": ["ff".repeat(16)]
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        // A second AppState over the same file is a restart.
+        let reborn = AppState::with_data(path.clone()).unwrap();
+        let (status, _) = call(
+            reborn,
+            Request::builder()
+                .uri(format!("/v1/items/{NS}/a"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "the item must still be there");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn a_forget_is_persisted_too_or_deleted_memories_come_back() {
+        let path = tmpfile("forget");
+        let state = AppState::with_data(path.clone()).unwrap();
+        let _ = call(
+            state.clone(),
+            post(
+                "/v1/items",
+                serde_json::json!({
+                    "namespace": NS, "item_id": "a", "sealed": SEALED(), "tokens": []
+                }),
+            ),
+        )
+        .await;
+        let _ = call(
+            state,
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/v1/items/{NS}/a"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        let reborn = AppState::with_data(path.clone()).unwrap();
+        let (status, _) = call(
+            reborn,
+            Request::builder()
+                .uri(format!("/v1/items/{NS}/a"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "a forgotten memory must not resurrect"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The snapshot is ciphertext. If it ever is not, this is the test that should say so.
+    #[tokio::test]
+    async fn the_snapshot_on_disk_holds_no_plaintext() {
+        use nutcracker_crypto::RootKey;
+        let path = tmpfile("sealed");
+        let state = AppState::with_data(path.clone()).unwrap();
+
+        let nsk = RootKey::from_bytes([9u8; 32]).namespace_key("n", 0);
+        let sealed = nsk.seal("a", b"a memorable secret phrase").unwrap();
+        let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+
+        let _ = call(
+            state,
+            post("/v1/items", serde_json::json!({
+                "namespace": NS, "item_id": "a",
+                "sealed": {
+                    "ciphertext": hex(&sealed.ciphertext), "nonce": hex(&sealed.nonce),
+                    "wrapped_key": hex(&sealed.wrapped_key), "wrap_nonce": hex(&sealed.wrap_nonce)
+                },
+                "tokens": []
+            })),
+        )
+        .await;
+
+        let raw = std::fs::read(&path).unwrap();
+        for chunk in b"a memorable secret phrase".windows(6) {
+            assert!(
+                !raw.windows(chunk.len()).any(|w| w == chunk),
+                "a fragment of the plaintext reached the snapshot file"
+            );
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A corrupt snapshot must fail loudly. Starting empty would look identical to a provider
+    /// that lost everything and did not mention it.
+    #[tokio::test]
+    async fn a_corrupt_snapshot_is_an_error_not_a_silent_fresh_start() {
+        let path = tmpfile("corrupt");
+        std::fs::write(&path, b"{ this is not json").unwrap();
+        assert!(AppState::with_data(path.clone()).is_err());
+        let _ = std::fs::remove_file(path);
+    }
+}

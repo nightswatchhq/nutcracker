@@ -4,9 +4,10 @@
 //! nutcracker-provider --listen 127.0.0.1:8099
 //! ```
 //!
-//! Storage is in memory in this build: it is a reference implementation, and a provider that
-//! actually sells this should back it with the Postgres schema in `nutcracker_store::schema`.
-//! Saying so here rather than shipping a durable-looking thing that is not.
+//! `--data <file>` snapshots after every mutation and reloads on start, which is enough for a
+//! personal provider. A provider actually *selling* this should back it with the Postgres schema
+//! in `nutcracker_store::schema`; a JSON snapshot is honest about being a single-writer file and
+//! should not be dressed up as more.
 
 use clap::Parser;
 use nutcracker_provider::{router, AppState};
@@ -16,6 +17,11 @@ use nutcracker_provider::{router, AppState};
 struct Args {
     #[arg(long, env = "NUTCRACKER_LISTEN", default_value = "127.0.0.1:8099")]
     listen: String,
+
+    /// Snapshot file. Without it everything is lost on restart, which is fine for a demo and
+    /// not fine for anything you would keep notes in.
+    #[arg(long, env = "NUTCRACKER_DATA")]
+    data: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -27,8 +33,19 @@ async fn main() -> anyhow::Result<()> {
         .init();
     let args = Args::parse();
 
+    let state = match &args.data {
+        Some(p) => AppState::with_data(p.clone())?,
+        None => AppState::default(),
+    };
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
-    tracing::info!(listen = %args.listen, "nutcracker provider up; storage is in-memory (reference build)");
-    axum::serve(listener, router(AppState::default())).await?;
+    match &args.data {
+        Some(p) => {
+            tracing::info!(listen = %args.listen, data = %p.display(), "nutcracker provider up")
+        }
+        None => {
+            tracing::warn!(listen = %args.listen, "nutcracker provider up with NO --data: everything is lost on restart")
+        }
+    }
+    axum::serve(listener, router(state)).await?;
     Ok(())
 }

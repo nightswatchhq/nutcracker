@@ -26,7 +26,7 @@ pub enum StoreError {
 /// How an item was indexed. Recorded per item because a namespace containing a single
 /// plaintext-vector item is no longer end-to-end encrypted, and the store must be able to say so
 /// rather than let the claim quietly rot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum IndexMode {
     /// Keyed bucket tokens. The default; the provider learns bucket occupancy and nothing more.
     BlindIndex,
@@ -35,7 +35,7 @@ pub enum IndexMode {
 }
 
 /// What a provider stores for one item. Every field is opaque to it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StoredItem {
     pub item_id: String,
     pub sealed: SealedItem,
@@ -54,7 +54,7 @@ pub struct Candidate {
 }
 
 /// Counters a provider reports on-chain. Self-reported and unprovable; see the contract.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Usage {
     pub writes: u128,
     pub reads: u128,
@@ -94,9 +94,48 @@ pub struct InMemoryStore {
     usage: Usage,
 }
 
+/// Everything a provider holds, in a form it can write to disk. Still entirely opaque: this is
+/// ciphertext and bucket tokens, and a snapshot file leaks exactly what the running process does.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Snapshot {
+    pub items: Vec<(NamespaceHandle, Vec<StoredItem>)>,
+    pub capacity: Vec<(NamespaceHandle, u64)>,
+    pub usage: Usage,
+}
+
 impl InMemoryStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A durable-enough provider: snapshot after each mutation, load at start.
+    ///
+    /// Not Postgres, and it should not pretend to be — `schema` holds the real thing. This exists
+    /// so a personal provider survives a restart, which is the difference between a demo and
+    /// something somebody would keep their notes in.
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            items: self
+                .items
+                .iter()
+                .map(|(ns, m)| (ns.clone(), m.values().cloned().collect()))
+                .collect(),
+            capacity: self.capacity.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            usage: self.usage,
+        }
+    }
+
+    pub fn restore(snap: Snapshot) -> Self {
+        let mut s = Self::new();
+        for (ns, items) in snap.items {
+            let e = s.items.entry(ns).or_default();
+            for i in items {
+                e.insert(i.item_id.clone(), i);
+            }
+        }
+        s.capacity = snap.capacity.into_iter().collect();
+        s.usage = snap.usage;
+        s
     }
 
     /// Sets the item cap a provider committed to on-chain for this namespace.

@@ -812,6 +812,7 @@ dependencies = [
  "hmac",
  "rand",
  "rand_core",
+ "serde",
  "sha2",
  "thiserror",
  "zeroize",
@@ -841,6 +842,7 @@ version = "0.1.0"
 dependencies = [
  "nutcracker-crypto",
  "rand",
+ "serde",
  "thiserror",
 ]
 

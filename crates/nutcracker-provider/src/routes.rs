@@ -21,12 +21,55 @@ use crate::wire::*;
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<Mutex<InMemoryStore>>,
+    /// Where to snapshot after each mutation. `None` keeps everything in memory, which is fine
+    /// for a demo and useless for anything you would keep notes in.
+    pub data_path: Option<Arc<std::path::PathBuf>>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
             store: Arc::new(Mutex::new(InMemoryStore::new())),
+            data_path: None,
+        }
+    }
+}
+
+impl AppState {
+    /// Loads a snapshot if one exists. A missing file is a fresh provider, not an error; a
+    /// **corrupt** one is an error, because silently starting empty looks exactly like a provider
+    /// that lost everything and decided not to mention it.
+    pub fn with_data(path: std::path::PathBuf) -> anyhow::Result<Self> {
+        let store = if path.exists() {
+            let raw = std::fs::read(&path)?;
+            let snap: nutcracker_store::Snapshot = serde_json::from_slice(&raw)?;
+            InMemoryStore::restore(snap)
+        } else {
+            InMemoryStore::new()
+        };
+        Ok(Self {
+            store: Arc::new(Mutex::new(store)),
+            data_path: Some(Arc::new(path)),
+        })
+    }
+
+    /// Writes via a temp file and renames, so an interrupted save cannot leave a half-written
+    /// snapshot where a complete one used to be.
+    fn persist(&self) {
+        let Some(path) = &self.data_path else { return };
+        let snap = self.store.lock().expect("store mutex").snapshot();
+        let tmp = path.with_extension("tmp");
+        let write = serde_json::to_vec(&snap)
+            .map_err(|e| e.to_string())
+            .and_then(|b| std::fs::write(&tmp, b).map_err(|e| e.to_string()))
+            .and_then(|()| std::fs::rename(&tmp, path.as_path()).map_err(|e| e.to_string()));
+        if let Err(e) = write {
+            // Loudly. A provider that silently stops persisting looks perfectly healthy right up
+            // until a restart, which is the exact failure mode this codebase keeps meeting.
+            tracing::error!(
+                error = %e, path = %path.display(),
+                "FAILED TO PERSIST - data will be lost on restart"
+            );
         }
     }
 }
@@ -122,6 +165,7 @@ async fn write(
             ),
             other => (StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
         })?;
+    st.persist();
     Ok(StatusCode::CREATED)
 }
 
@@ -173,6 +217,7 @@ async fn forget(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let ns = parse_handle(&namespace).ok_or_else(|| bad("namespace must be 16 hex bytes"))?;
     let removed = st.store.lock().expect("store mutex").forget(&ns, &item_id);
+    st.persist();
     // 200 either way: the caller asked, the provider complied or had nothing to comply with, and
     // `removed` says which. A 404 here would leak whether an item existed to anyone who guesses.
     Ok(Json(serde_json::json!({ "removed": removed })))
