@@ -93,8 +93,36 @@ keys.**
 ## Run it
 
 ```sh
-cargo run -p nutcracker-provider                       # a provider on :8099
-cargo run -p nutcracker-agent --example http_roundtrip  # seal, POST, search, decrypt
+cargo run -p nutcracker-provider                        # a provider on :8099
+head -c 32 /dev/urandom > ~/.nutcracker/root.key        # your key. Back it up; nobody can recover it.
+cargo run --bin nutcracker-mcp -- --key ~/.nutcracker/root.key
+```
+
+`nutcracker-mcp` is an MCP server over stdio. Point an agent at **it**, not at a provider. A real
+session:
+
+```
+initialize  -> nutcracker v0.1.0
+tools/list  -> [memory.write, memory.search, memory.read, memory.forget]
+memory.write -> remembered as mdf8f2d65af0e0ab9
+memory.search
+  [mdf8f2d65af0e0ab9 1.00] Chief decided we develop data services but do not operate them...
+  [m488e5949e83ed448 0.89] the DIPS rails went live on Arbitrum One and were wired on 25 August...
+```
+
+The provider narrowed that by blinded bucket tokens and could not read either memory. The scores
+were computed locally, after decryption — a bucket collision is a hint, not a similarity, so
+serving the provider's ordering straight to the agent would surface unrelated memories as matches.
+
+The key is read from a **file**, never a flag or an env var: argv is world-readable on Linux via
+`/proc`, and environment blocks leak into crash reports and child processes.
+
+The bundled embedder is a bag-of-bytes placeholder so the binary runs with no network dependency.
+Swap in a real local sentence-transformer. **It must stay local** — a remote embedding call ships
+the plaintext to a third party and undoes the entire design.
+
+```sh
+cargo run -p nutcracker-agent --example http_roundtrip  # the same path without MCP
 ```
 
 The example seals a memory locally, writes it over HTTP, searches by blinded bucket tokens, and
@@ -122,7 +150,7 @@ than half-built inside.
 cd contracts && forge test
 ```
 
-15 contract tests, 56 Rust tests. `graphprotocol/contracts` is pinned to `2629e646…` (main) — see the gotchas in
+15 contract tests, 61 Rust tests. `graphprotocol/contracts` is pinned to `2629e646…` (main) — see the gotchas in
 `nightswatchhq/horizon-skills`, since the documented `horizon@1.1.0` pin moves several APIs.
 
 Apache-2.0.

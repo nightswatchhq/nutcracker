@@ -24,9 +24,25 @@ pub enum ToolError {
 pub struct Memory {
     pub item_id: String,
     pub text: String,
-    /// How many index bands this shared with the query. Higher is closer, and it is the only
-    /// ranking signal the provider contributed — the fine ordering happened here.
+    /// How many index bands this shared with the query. The provider's contribution, and it is
+    /// coarse: a bucket collision is a hint, not a similarity.
     pub shared_bands: usize,
+    /// Cosine similarity between the query and this memory, computed **here**, after decryption.
+    /// This is the ranking that matters, and the provider could not have computed it.
+    pub score: f32,
+}
+
+/// Cosine similarity. Returns 0 for a zero-magnitude vector rather than NaN, because a NaN in a
+/// sort comparator silently produces a nonsense ordering instead of an error.
+fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if na == 0.0 || nb == 0.0 {
+        0.0
+    } else {
+        dot / (na * nb)
+    }
 }
 
 /// Turns text into an embedding. Runs locally; a remote embedder would ship the plaintext to a
@@ -174,6 +190,7 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
             item_id: item_id.to_string(),
             text: String::from_utf8_lossy(&plain).into_owned(),
             shared_bands: 0,
+            score: 1.0,
         })
     }
 
@@ -196,18 +213,32 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
             limit: limit.saturating_mul(4).max(limit),
         })?;
 
+        // The fine ranking, which is the half the provider cannot do. Bucket collisions are a
+        // coarse hint — at the default parameters roughly 3% of returned candidates are unrelated
+        // — so handing the provider's ordering straight to the agent would surface those as
+        // matches. Decrypt, re-embed, rank by actual similarity, then cut.
+        let query_vec = embedder.embed(query);
         let mut out = Vec::new();
         for c in candidates {
             // A candidate that will not decrypt is not an error to surface to the agent — it is a
-            // provider returning something from another generation, or junk. Skip it.
+            // provider returning something from another key generation, or junk. Skip it.
             if let Ok(plain) = nsk.open(&c.item_id, &c.sealed) {
+                let text = String::from_utf8_lossy(&plain).into_owned();
                 out.push(Memory {
                     item_id: c.item_id,
-                    text: String::from_utf8_lossy(&plain).into_owned(),
+                    score: cosine(&query_vec, &embedder.embed(&text)),
+                    text,
                     shared_bands: c.shared_bands,
                 });
             }
         }
+        // Descending by score, ties broken on id so identical queries give identical orderings.
+        out.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.item_id.cmp(&b.item_id))
+        });
         out.truncate(limit);
         Ok(out)
     }

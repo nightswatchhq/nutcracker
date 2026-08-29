@@ -29,8 +29,10 @@
 //! transport. Anything claiming to be an agent-facing remote memory MCP server is holding your
 //! keys.
 
+pub mod http;
 pub mod tools;
 pub mod transport;
 
+pub use http::HttpTransport;
 pub use tools::{tool_definitions, MemoryTools, ToolError};
 pub use transport::{ProviderTransport, TransportError};

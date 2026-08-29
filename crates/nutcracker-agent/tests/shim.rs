@@ -271,6 +271,54 @@ fn candidates_that_do_not_decrypt_are_skipped_not_surfaced() {
     assert_eq!(hits[0].item_id, "new");
 }
 
+/// The half the provider cannot do. Bucket collisions are a coarse hint — roughly 3% of returned
+/// candidates are unrelated at the default parameters — so the provider's ordering must not be
+/// what reaches the agent. This test failed to exist until a real MCP session returned an
+/// unrelated memory as a match.
+#[test]
+fn candidates_are_re_ranked_locally_not_served_in_provider_order() {
+    let mut t = tools();
+    t.write(
+        "notes",
+        "match",
+        "postgres postgres postgres postgres",
+        None,
+    )
+    .unwrap();
+    t.write("notes", "unrelated", "zzz qqq zzz qqq zzz qqq", None)
+        .unwrap();
+
+    let hits = t
+        .search("notes", "postgres postgres postgres postgres", 5)
+        .unwrap();
+    assert!(!hits.is_empty());
+    assert_eq!(
+        hits[0].item_id, "match",
+        "the closest memory must come first"
+    );
+    assert!(
+        hits[0].score > 0.9,
+        "an near-identical query should score high: {}",
+        hits[0].score
+    );
+    if hits.len() > 1 {
+        assert!(
+            hits[0].score > hits[1].score,
+            "results must be ordered by local similarity, not by the provider's bucket count"
+        );
+    }
+}
+
+/// A zero-magnitude embedding must not produce NaN, because NaN in a sort comparator silently
+/// yields a nonsense ordering rather than an error.
+#[test]
+fn an_empty_query_does_not_produce_a_nan_ordering() {
+    let mut t = tools();
+    t.write("notes", "a", "something", None).unwrap();
+    let hits = t.search("notes", "", 5).unwrap();
+    assert!(hits.iter().all(|h| !h.score.is_nan()), "no NaN scores");
+}
+
 #[test]
 fn search_respects_the_limit_after_local_ranking() {
     let mut t = tools();
