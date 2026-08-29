@@ -56,6 +56,49 @@ provider, how much, and since when — permanently, against an address.
   legible: deletions are counted and a provider's forget-to-write ratio is public. Not a proof, but
   a number somebody can ask about.
 - It cannot recover a lost root key. User-held means user-held.
+- **The published recall figures describe near-duplicate retrieval, not semantic relatedness, and
+  they were measured on a geometry no real corpus has.** See below; this is the most load-bearing
+  caveat in the document.
+
+## What the recall numbers actually measured
+
+`cargo run -p nutcracker-crypto --example leakage` reports 100% recall at 0.2 perturbation, 94% at
+0.5, ~3% false candidates. Those figures are correct and they are a fair characterisation of the LSH
+scheme. They are also answering a narrower question than a reader will hear, in two ways, and
+`--example geometry` measures both.
+
+**One: uniformly random vectors are not embeddings.** Transformer embeddings crowd into a narrow
+cone rather than filling the sphere. Re-running the same index against corpora with that shape:
+
+| corpus | recall | false candidates | mean cos(unrelated) |
+|---|---|---|---|
+| uniform sphere, loose clusters | 28% | 2% | 0.00 |
+| mildly anisotropic (0.3) | 40% | 6% | 0.15 |
+| anisotropic (0.6) | 72% | 26% | 0.69 |
+| severely anisotropic (0.8) | 100% | 99% | 0.94 |
+| ↳ 0.6, mean-centred first | 27% | 4% | 0.00 |
+| ↳ 0.8, mean-centred first | 28% | 3% | -0.00 |
+
+Read the false-candidate column. On a realistically anisotropic corpus it is **26%, not 3%** — an
+order of magnitude more than published, and that column is the leakage: every false candidate is an
+item the provider is asked for and learns was a candidate. At 0.8 the index degenerates entirely and
+every item matches every query, which reads as 100% recall and is the scheme telling you nothing.
+
+**Mean-centring fixes it, and restores the uniform-sphere baseline exactly** (27–28% recall against
+28%, 3–4% false against 2%). It is not free: the mean must be computed client-side, and it must stay
+**fixed for the lifetime of a namespace**, because changing it makes every token computed afterwards
+disagree with every token computed before. That is a migration, not a knob. Not yet implemented.
+
+**Two: 0.05 perturbation is a near-duplicate.** Retrieving those is easy and is not what anyone means
+by semantic search. On loosely clustered data — related but not nearly identical, which is the real
+case — recall at the default 8×8 is around **28%**, not the 94–100% the perturbation table suggests.
+Loosening the parameters chases that tail and discloses more; the trade is real and this is its shape.
+
+The honest summary: the blind index is sound and the crypto around it does what it claims. The
+retrieval quality has been characterised against synthetic vectors and **not yet against a real
+embedding model**, and the placeholder embedder in the agent binary is a bag-of-bytes vector that is
+not a semantic model at all. Anyone evaluating this for real work should read that as the open
+question it is.
 
 ## What is here
 
