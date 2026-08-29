@@ -1,0 +1,27 @@
+[package]
+name = "nutcracker-provider"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "A runnable nutcracker provider: HTTP over the sealed store. Holds no keys and no plaintext, and could not decrypt what it stores if it wanted to."
+
+[[bin]]
+name = "nutcracker-provider"
+path = "src/main.rs"
+
+[dependencies]
+nutcracker-crypto = { path = "../nutcracker-crypto" }
+nutcracker-store = { path = "../nutcracker-store" }
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

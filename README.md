@@ -64,6 +64,7 @@ provider, how much, and since when — permanently, against an address.
 | `nutcracker-crypto` | client-side: three-layer envelope encryption, the keyed blind index |
 | `nutcracker-store` | provider-side: opaque ciphertext by namespace handle, searched by bucket token |
 | `nutcracker-agent` | the **local** MCP shim: holds the root key, seals before anything leaves the machine |
+| `nutcracker-provider` | a runnable provider: HTTP over the sealed store, holds no keys |
 | `contracts` | `MemoryDataService.sol` — providers and commitments, never users |
 
 The store's type signatures are the enforcement: **there is no way to hand it a plaintext, even by
@@ -89,13 +90,39 @@ The agent gets `memory.write("we chose postgres")`. The provider gets opaque byt
 tokens. **Anything advertising itself as a remote agent-facing memory MCP server is holding your
 keys.**
 
+## Run it
+
+```sh
+cargo run -p nutcracker-provider                       # a provider on :8099
+cargo run -p nutcracker-agent --example http_roundtrip  # seal, POST, search, decrypt
+```
+
+The example seals a memory locally, writes it over HTTP, searches by blinded bucket tokens, and
+decrypts what comes back:
+
+```
+wrote m1 (77 bytes of ciphertext)
+search returned 1 candidate(s)
+decrypted: "the blind index keys its hyperplanes off the namespace secret"
+
+The provider stored, indexed and served that back without ever being able to read it.
+```
+
+Storage in this build is in memory. A provider actually selling this should back it with the
+Postgres schema in `nutcracker_store::schema` — said here rather than shipping something that
+looks durable and is not.
+
+Payment is not wired into the provider. A real one fronts these handlers with the TAP receipt
+validation compass already implements and returns 402 without one; that belongs in front rather
+than half-built inside.
+
 ## Build
 
 ```sh
 cd contracts && forge test
 ```
 
-15 contract tests, 44 Rust tests. `graphprotocol/contracts` is pinned to `2629e646…` (main) — see the gotchas in
+15 contract tests, 56 Rust tests. `graphprotocol/contracts` is pinned to `2629e646…` (main) — see the gotchas in
 `nightswatchhq/horizon-skills`, since the documented `horizon@1.1.0` pin moves several APIs.
 
 Apache-2.0.
