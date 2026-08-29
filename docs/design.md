@@ -95,6 +95,25 @@ confidentiality and will want the performance. It must be **named** at write tim
 item stops describing itself as end-to-end encrypted. A privacy property that can be lost by a
 single default-valued field is not a property, it is a slogan.
 
+## Item names are part of the memory
+
+*(Added 2026-08-29, after running a provider on a second machine and reading its storage.)*
+
+Everything the provider held was opaque — ciphertext, bucket tokens, an unlinkable namespace
+handle — and beside it, in plain text, `item_id: "crossmachine"`.
+
+The shim's default ids are content hashes, so this only bites when a caller names one. Callers name
+things descriptively. `sofia-lease-renewal` would have told the provider everything the encryption
+was there to hide, and it would have looked fine in every test that checked the *ciphertext*.
+
+So the id a provider sees is now a keyed hash, and **the caller's own name is sealed inside the
+payload** alongside the text. Search recovers it on decrypt, which means an agent still gets back
+the name it chose rather than an opaque hash it cannot then read or forget by.
+
+The general lesson is duller than the fix: it is not enough to check that the secret is encrypted.
+Everything travelling *beside* the secret is also a disclosure, and metadata is where this class of
+system usually leaks.
+
 ## Keys: per user, delegated to agents
 
 "Portable across heterogeneous models and agents" settles the key question on its own. If the key

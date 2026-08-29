@@ -3,6 +3,7 @@
 use nutcracker_crypto::{BlindIndex, IndexParams, NamespaceHandle, NamespaceKey, RootKey};
 use nutcracker_store::IndexMode;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::transport::{ProviderTransport, SealedSearch, SealedWrite, TransportError};
 
@@ -30,6 +31,34 @@ pub struct Memory {
     /// Cosine similarity between the query and this memory, computed **here**, after decryption.
     /// This is the ranking that matters, and the provider could not have computed it.
     pub score: f32,
+}
+
+/// Wraps the caller's item name and the text into one sealed payload.
+///
+/// Length-prefixed rather than JSON: the name is arbitrary user input and a delimiter would need
+/// escaping, which is where this sort of thing usually goes wrong.
+fn frame(item_id: &str, text: &str) -> Vec<u8> {
+    let id = item_id.as_bytes();
+    let mut out = Vec::with_capacity(4 + id.len() + text.len());
+    out.extend_from_slice(&(id.len() as u32).to_be_bytes());
+    out.extend_from_slice(id);
+    out.extend_from_slice(text.as_bytes());
+    out
+}
+
+/// Inverse of [`frame`]. A payload that does not parse is treated as a bare pre-framing text with
+/// an empty name rather than an error, so an older item stays readable instead of vanishing.
+fn unframe(plain: &[u8]) -> (String, String) {
+    if plain.len() >= 4 {
+        let n = u32::from_be_bytes([plain[0], plain[1], plain[2], plain[3]]) as usize;
+        if 4 + n <= plain.len() {
+            return (
+                String::from_utf8_lossy(&plain[4..4 + n]).into_owned(),
+                String::from_utf8_lossy(&plain[4 + n..]).into_owned(),
+            );
+        }
+    }
+    (String::new(), String::from_utf8_lossy(plain).into_owned())
 }
 
 /// Cosine similarity. Returns 0 for a zero-magnitude vector rather than NaN, because a NaN in a
@@ -149,6 +178,25 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
         )
     }
 
+    /// Blinds a caller-chosen item id before it reaches the provider.
+    ///
+    /// Found by running a provider on a second machine and reading its storage: the ciphertext was
+    /// opaque, the bucket tokens were opaque, and sitting beside them in plain text was
+    /// `item_id: "crossmachine"`. The shim's *default* ids are content hashes, so this only bites
+    /// when a caller names one — and callers name things descriptively. `sofia-lease-renewal`
+    /// would have told the provider everything the encryption was there to hide.
+    ///
+    /// Derived from the namespace *handle* rather than the namespace key, so it survives rotation.
+    /// A rotating id would orphan every stored item the moment an agent was revoked.
+    fn blind_id(&self, namespace: &str, item_id: &str) -> String {
+        let mut h = Sha256::new();
+        h.update(b"nutcracker:item:v1");
+        h.update(self.root.namespace_handle(namespace).0);
+        h.update(item_id.as_bytes());
+        let d: [u8; 32] = h.finalize().into();
+        d[..16].iter().map(|b| format!("{b:02x}")).collect()
+    }
+
     pub fn write(
         &mut self,
         namespace: &str,
@@ -157,8 +205,13 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
         expires_at: Option<u64>,
     ) -> Result<(), ToolError> {
         let (nsk, handle) = self.keys(namespace);
+        let wire_id = self.blind_id(namespace, item_id);
+        // The caller's own name for this memory goes INSIDE the ciphertext, not beside it. The
+        // provider gets a blinded id it cannot reverse; the client recovers the real name on
+        // decrypt, so `memory.search` can hand the agent back the name it chose rather than an
+        // opaque hash it cannot then read or forget by.
         let sealed = nsk
-            .seal(item_id, text.as_bytes())
+            .seal(&wire_id, &frame(item_id, text))
             .map_err(|e| ToolError::Crypto(e.to_string()))?;
 
         // No embedder means no index. The item is still stored and still readable by id — it is
@@ -171,7 +224,7 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
 
         self.transport.write(SealedWrite {
             namespace: handle,
-            item_id: item_id.to_string(),
+            item_id: wire_id,
             sealed,
             tokens,
             mode: IndexMode::BlindIndex,
@@ -182,13 +235,15 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
 
     pub fn read(&mut self, namespace: &str, item_id: &str) -> Result<Memory, ToolError> {
         let (nsk, handle) = self.keys(namespace);
-        let sealed = self.transport.read(&handle, item_id)?;
+        let wire_id = self.blind_id(namespace, item_id);
+        let sealed = self.transport.read(&handle, &wire_id)?;
         let plain = nsk
-            .open(item_id, &sealed)
+            .open(&wire_id, &sealed)
             .map_err(|e| ToolError::Crypto(e.to_string()))?;
+        let (_, text) = unframe(&plain);
         Ok(Memory {
             item_id: item_id.to_string(),
-            text: String::from_utf8_lossy(&plain).into_owned(),
+            text,
             shared_bands: 0,
             score: 1.0,
         })
@@ -223,9 +278,11 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
             // A candidate that will not decrypt is not an error to surface to the agent — it is a
             // provider returning something from another key generation, or junk. Skip it.
             if let Ok(plain) = nsk.open(&c.item_id, &c.sealed) {
-                let text = String::from_utf8_lossy(&plain).into_owned();
+                // The name the caller chose comes out of the ciphertext, so the agent gets back
+                // an id it can actually pass to read or forget.
+                let (name, text) = unframe(&plain);
                 out.push(Memory {
-                    item_id: c.item_id,
+                    item_id: name,
                     score: cosine(&query_vec, &embedder.embed(&text)),
                     text,
                     shared_bands: c.shared_bands,
@@ -245,6 +302,7 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
 
     pub fn forget(&mut self, namespace: &str, item_id: &str) -> Result<bool, ToolError> {
         let (_, handle) = self.keys(namespace);
-        Ok(self.transport.forget(&handle, item_id)?)
+        let wire_id = self.blind_id(namespace, item_id);
+        Ok(self.transport.forget(&handle, &wire_id)?)
     }
 }

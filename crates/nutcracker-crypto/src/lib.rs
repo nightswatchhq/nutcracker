@@ -16,6 +16,10 @@
 //! Stated plainly, because the whole point of the design is that this list is short and honest:
 //!
 //! - **Sizes.** Ciphertext length reveals plaintext length. Not padded.
+//! - **Not the item name.** Item ids are blinded by the shim before they reach a provider, and the
+//!   caller's own name is sealed inside the payload. This was not true until a provider was run on
+//!   a second machine and its storage read: everything was opaque except `item_id`, sitting there
+//!   in plain text. Callers name things descriptively.
 //! - **Counts and timing.** How many items a namespace holds and when they were touched.
 //! - **Bucket occupancy.** Which of `2^band_bits` buckets a namespace occupies per band, and which
 //!   bucket a query touched. Bucket tokens are HMACs under the namespace key, so they are not

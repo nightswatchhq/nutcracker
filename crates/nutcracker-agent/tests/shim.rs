@@ -205,6 +205,56 @@ fn search_finds_a_related_memory_and_ranks_it() {
     assert!(hits[0].shared_bands > 0);
 }
 
+/// Found by running a provider on a second machine and reading its storage: everything was
+/// opaque except the item id, sitting there in plain text. Callers name things descriptively —
+/// `sofia-lease-renewal` would tell a provider everything the encryption was hiding.
+#[test]
+fn a_descriptive_item_id_never_reaches_the_provider() {
+    let wire: Wire = Rc::new(RefCell::new(Vec::new()));
+    let provider = LocalProvider {
+        store: InMemoryStore::new(),
+        seen: Rc::clone(&wire),
+    };
+    let mut t = MemoryTools::new(
+        RootKey::from_bytes([11u8; 32]),
+        provider,
+        Some(CharEmbedder),
+    );
+
+    t.write("notes", "sofia-lease-renewal", "renews in March", None)
+        .unwrap();
+
+    let seen = wire.borrow();
+    for buf in seen.iter() {
+        for chunk in b"sofia-lease-renewal".windows(5) {
+            assert!(
+                !buf.windows(chunk.len()).any(|w| w == chunk),
+                "a fragment of the item id crossed the wire"
+            );
+        }
+    }
+    drop(seen);
+    // And it still round-trips under the caller's own name.
+    assert_eq!(
+        t.read("notes", "sofia-lease-renewal").unwrap().text,
+        "renews in March"
+    );
+}
+
+/// The blinded id must be stable across key rotation, or revoking an agent orphans every item.
+#[test]
+fn a_blinded_id_survives_key_rotation() {
+    let mut t = tools();
+    t.write("notes", "named", "before rotation", None).unwrap();
+    t.rotate();
+    // The item cannot be *decrypted* after rotation (that is the point of rotation), but it must
+    // still be addressable — otherwise rewrapping it would be impossible.
+    assert!(
+        t.forget("notes", "named").unwrap(),
+        "still addressable by the same name"
+    );
+}
+
 #[test]
 fn namespaces_do_not_leak_into_each_other() {
     let mut t = tools();
