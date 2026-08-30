@@ -89,6 +89,39 @@ every item matches every query, which reads as 100% recall and is the scheme tel
 **fixed for the lifetime of a namespace**, because changing it makes every token computed afterwards
 disagree with every token computed before. That is a migration, not a knob. Not yet implemented.
 
+### Measured against a real model (2026-08-30)
+
+The synthetic argument above turned out to be a fair predictor, and now there is no need to argue
+from it. 48 sentences over 12 topics, embedded by `nomic-embed-text` (768-dim) on a real Ollama
+install, with same-topic pairs deliberately **not** near-duplicates. Corpus committed beside
+`--example real_embeddings`, so the numbers reproduce without a GPU.
+
+**Unrelated sentences sit at cosine 0.43, not 0.00**, and the distributions overlap: related pairs
+average 0.62 but reach down to 0.42, while unrelated pairs reach up to 0.61.
+
+| bands × bits | recall | false candidates | corpus |
+|---|---|---|---|
+| 8 × 8 (default) | 46% | 22% | as-is |
+| 8 × 8 | 17% | 3% | mean-centred |
+| 16 × 8 | 69% | 38% | as-is |
+| 8 × 4 | 88% | 75% | as-is |
+| 16 × 4 | 100% | 96% | as-is |
+
+**Read the two columns together, because they move together.** There is no setting here that buys
+good recall and low disclosure at once: 100% recall is bought by returning 96% of unrelated items as
+candidates, which is asking the provider for most of the corpus and calling it a search. At the
+default the honest summary is **46% of related pairs retrieved, 22% of unrelated ones surfaced** —
+a real search with a real cost, and not the shape the perturbation table implies.
+
+Mean-centring cuts disclosure hard (22% → 3%) and costs recall (46% → 17%). That is worse than the
+synthetic run predicted, and the reason is instructive: on real embeddings part of the topical signal
+genuinely lives along the shared direction, so removing it removes some of the thing you were
+searching for. On a 48-sentence corpus the mean is also a poor estimate of itself.
+
+One implementation note the measurement forced out: `shared_bands` re-derives every hyperplane
+component by hashing `(plane, dimension)`, so comparing per pair is `pairs × planes × dims` hashes.
+Tokenise each item once. The first version of the benchmark did not, and ran for twenty minutes.
+
 **Two: 0.05 perturbation is a near-duplicate.** Retrieving those is easy and is not what anyone means
 by semantic search. On loosely clustered data — related but not nearly identical, which is the real
 case — recall at the default 8×8 is around **28%**, not the 94–100% the perturbation table suggests.
