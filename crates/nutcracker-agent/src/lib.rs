@@ -29,6 +29,7 @@
 //! transport. Anything claiming to be an agent-facing remote memory MCP server is holding your
 //! keys.
 
+pub mod embedder;
 pub mod http;
 pub mod tools;
 pub mod transport;

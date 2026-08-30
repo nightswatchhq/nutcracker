@@ -12,7 +12,8 @@ use std::io::{BufRead, Write};
 
 use clap::Parser;
 use nutcracker_agent::{
-    tools::{Embedder, MemoryTools},
+    embedder::{check_or_record, manifest_path_for, BagOfBytes, Embedder, Ollama},
+    tools::MemoryTools,
     HttpTransport,
 };
 use nutcracker_crypto::RootKey;
@@ -37,26 +38,30 @@ struct Args {
 
     #[arg(long, default_value = "default")]
     namespace: String,
-}
 
-/// A placeholder local embedder.
-///
-/// Search quality is only as good as this, and a bag-of-bytes vector is not a semantic model. It
-/// is here so the binary runs end to end with no network dependency; a real deployment swaps in a
-/// local sentence-transformer. **It must stay local.** A remote embedding call would ship the
-/// plaintext to a third party and undo the entire design, which is the single easiest way to
-/// accidentally destroy this product.
-struct LocalBagOfBytes;
+    /// Embedding model, or `bag-of-bytes` for the dependency-free placeholder.
+    ///
+    /// Defaults to a real local model, because the placeholder is a byte histogram and not a
+    /// semantic model: measured recall against real sentences is in the README, and it is the
+    /// difference between search and coincidence.
+    #[arg(long, env = "NUTCRACKER_EMBEDDER", default_value = "nomic-embed-text")]
+    embedder: String,
 
-impl Embedder for LocalBagOfBytes {
-    fn embed(&self, text: &str) -> Vec<f32> {
-        let mut v = vec![0f32; 64];
-        for b in text.to_lowercase().bytes() {
-            v[(b % 64) as usize] += 1.0;
-        }
-        let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1.0);
-        v.iter().map(|x| x / norm).collect()
-    }
+    /// Where the embedder listens. Loopback only unless you explicitly say otherwise.
+    #[arg(
+        long,
+        env = "NUTCRACKER_EMBEDDER_URL",
+        default_value = "http://127.0.0.1:11434"
+    )]
+    embedder_url: String,
+
+    /// Permit a non-loopback embedder.
+    ///
+    /// Named for what it costs rather than for what it enables. An embedder sees the plaintext of
+    /// every memory before it is sealed, so a remote one hands your memories to a third party in
+    /// the clear and leaves the encryption doing nothing but decorating the trip afterwards.
+    #[arg(long)]
+    i_accept_sending_plaintext_to_a_remote_embedder: bool,
 }
 
 fn read_key(path: &std::path::Path) -> anyhow::Result<RootKey> {
@@ -92,11 +97,33 @@ fn text_result(s: impl Into<String>) -> serde_json::Value {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let root = read_key(&args.key)?;
-    let mut tools = MemoryTools::new(
-        root,
-        HttpTransport::new(&args.provider),
-        Some(LocalBagOfBytes),
-    );
+
+    // A real local model by default. `--embedder bag-of-bytes` keeps the old placeholder for
+    // running with nothing installed, and it is named for what it is rather than for what one
+    // might wish it were.
+    let embedder: Box<dyn Embedder> = if args.embedder == "bag-of-bytes" {
+        Box::new(BagOfBytes)
+    } else {
+        Box::new(Ollama::new(
+            &args.embedder_url,
+            &args.embedder,
+            args.i_accept_sending_plaintext_to_a_remote_embedder,
+        )?)
+    };
+
+    // Refuses rather than warns. See `embedder.rs`: a changed model means a disjoint token space,
+    // so old memories become unfindable and new ones look fine, with nothing to see in a log.
+    check_or_record(&manifest_path_for(&args.key), embedder.as_ref())?;
+
+    // Fail at startup rather than at the agent's first search, where the error arrives as a broken
+    // tool call in the middle of somebody's conversation.
+    if let Err(e) = embedder.embed("startup probe") {
+        anyhow::bail!("{e}");
+    }
+
+    eprintln!("nutcracker-mcp: embedder={}", embedder.id());
+
+    let mut tools = MemoryTools::new(root, HttpTransport::new(&args.provider), Some(embedder));
 
     // stderr, never stdout: stdout is the MCP channel and a stray log line corrupts the stream.
     eprintln!(

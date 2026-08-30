@@ -127,11 +127,35 @@ by semantic search. On loosely clustered data — related but not nearly identic
 case — recall at the default 8×8 is around **28%**, not the 94–100% the perturbation table suggests.
 Loosening the parameters chases that tail and discloses more; the trade is real and this is its shape.
 
-The honest summary: the blind index is sound and the crypto around it does what it claims. The
-retrieval quality has been characterised against synthetic vectors and **not yet against a real
-embedding model**, and the placeholder embedder in the agent binary is a bag-of-bytes vector that is
-not a semantic model at all. Anyone evaluating this for real work should read that as the open
-question it is.
+The honest summary: the blind index is sound and the crypto around it does what it claims, and the
+retrieval quality is now measured rather than assumed. It is modest. Anyone evaluating this for real
+work should read the table above rather than the perturbation one.
+
+## The embedder
+
+`nutcracker-mcp` runs **`nomic-embed-text` through a local Ollama by default**. The bag-of-bytes
+placeholder is still there as `--embedder bag-of-bytes`, for running with nothing installed, and it
+is named for what it is: a histogram of byte values, not a semantic model.
+
+Three refusals, and each of them is a refusal rather than a warning on purpose.
+
+**A non-loopback embedder is refused.** An embedder sees the plaintext of every memory *before* it is
+sealed, so a remote one hands your memories to a third party in the clear and leaves the encryption
+decorating the trip afterwards. It is the single easiest way to destroy this product, and it would
+be one config line. The override is `--i-accept-sending-plaintext-to-a-remote-embedder`, named for
+what it costs rather than for what it enables.
+
+**Changing the model is refused.** Bucket tokens are derived from the embedding, so two models are
+two disjoint token spaces over the same memories. Swap one and everything stored before becomes
+unfindable, everything stored after looks fine, and nothing errors: an assistant that has quietly
+forgotten one era of its life. The model is recorded beside the key on first use and checked at
+every start, and the refusal explains the damage rather than just saying no. The same hazard is why
+the mean-centring fix above is described as a migration and not a knob.
+
+**A failing embedder is refused, never fallen back from.** There is no second embedder to reach for,
+because reaching for one would return vectors from a different space and silently corrupt the index.
+The binary probes the model at startup and exits with `Is Ollama running?` rather than failing later,
+in the middle of somebody's conversation.
 
 ## What is here
 

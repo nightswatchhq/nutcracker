@@ -18,6 +18,13 @@ pub enum ToolError {
              memory.read still works"
     )]
     NoEmbedder,
+    /// The embedder refused or could not be reached.
+    ///
+    /// Surfaced rather than swallowed: an agent told "search failed, Ollama is not running" can
+    /// act, where one silently handed results from a different vector space cannot. There is
+    /// deliberately no fallback embedder here for the same reason.
+    #[error(transparent)]
+    Embed(#[from] crate::embedder::EmbedError),
 }
 
 /// A retrieved memory, decrypted locally.
@@ -74,11 +81,7 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-/// Turns text into an embedding. Runs locally; a remote embedder would ship the plaintext to a
-/// third party and undo the entire design.
-pub trait Embedder {
-    fn embed(&self, text: &str) -> Vec<f32>;
-}
+pub use crate::embedder::{EmbedError, Embedder};
 
 /// The MCP tool schemas, as `tools/list` would return them.
 ///
@@ -218,7 +221,7 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
         // simply not searchable, which is honest, rather than silently sending the text somewhere
         // to be embedded.
         let tokens = match &self.embedder {
-            Some(e) => BlindIndex::new(&nsk, self.params).tokens(&e.embed(text)),
+            Some(e) => BlindIndex::new(&nsk, self.params).tokens(&e.embed(text)?),
             None => Vec::new(),
         };
 
@@ -258,7 +261,7 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
     ) -> Result<Vec<Memory>, ToolError> {
         let embedder = self.embedder.as_ref().ok_or(ToolError::NoEmbedder)?;
         let (nsk, handle) = self.keys(namespace);
-        let tokens = BlindIndex::new(&nsk, self.params).tokens(&embedder.embed(query));
+        let tokens = BlindIndex::new(&nsk, self.params).tokens(&embedder.embed(query)?);
 
         let candidates = self.transport.search(SealedSearch {
             namespace: handle,
@@ -269,10 +272,13 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
         })?;
 
         // The fine ranking, which is the half the provider cannot do. Bucket collisions are a
-        // coarse hint — at the default parameters roughly 3% of returned candidates are unrelated
-        // — so handing the provider's ordering straight to the agent would surface those as
-        // matches. Decrypt, re-embed, rank by actual similarity, then cut.
-        let query_vec = embedder.embed(query);
+        // coarse hint, and a much coarser one than this comment used to claim: it said 3%, which
+        // was measured on uniformly random vectors. Against real embeddings (nomic-embed-text,
+        // 2026-08-30) the figure at the default parameters is **22%** of returned candidates being
+        // unrelated. So handing the provider's ordering straight to the agent would surface roughly
+        // one unrelated item in five as a match. Decrypt, re-embed, rank by actual similarity,
+        // then cut.
+        let query_vec = embedder.embed(query)?;
         let mut out = Vec::new();
         for c in candidates {
             // A candidate that will not decrypt is not an error to surface to the agent — it is a
@@ -281,9 +287,13 @@ impl<T: ProviderTransport, E: Embedder> MemoryTools<T, E> {
                 // The name the caller chose comes out of the ciphertext, so the agent gets back
                 // an id it can actually pass to read or forget.
                 let (name, text) = unframe(&plain);
+                // A failure here is fatal to the search rather than skipped: dropping a candidate
+                // because the embedder hiccuped would silently shorten the answer, and a shorter
+                // answer that looks complete is the failure this whole module is careful about.
+                let score = cosine(&query_vec, &embedder.embed(&text)?);
                 out.push(Memory {
                     item_id: name,
-                    score: cosine(&query_vec, &embedder.embed(&text)),
+                    score,
                     text,
                     shared_bands: c.shared_bands,
                 });

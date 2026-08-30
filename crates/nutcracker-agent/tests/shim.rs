@@ -80,13 +80,16 @@ impl ProviderTransport for LocalProvider {
 struct CharEmbedder;
 
 impl Embedder for CharEmbedder {
-    fn embed(&self, text: &str) -> Vec<f32> {
+    fn embed(&self, text: &str) -> Result<Vec<f32>, nutcracker_agent::embedder::EmbedError> {
         let mut v = vec![0f32; 64];
         for b in text.to_lowercase().bytes() {
             v[(b % 64) as usize] += 1.0;
         }
         let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1.0);
-        v.iter().map(|x| x / norm).collect()
+        Ok(v.iter().map(|x| x / norm).collect())
+    }
+    fn id(&self) -> String {
+        "test-char-embedder".into()
     }
 }
 
@@ -281,8 +284,11 @@ fn forget_removes_it() {
 fn search_without_an_embedder_refuses_rather_than_leaking_the_query() {
     struct NoEmbedder;
     impl Embedder for NoEmbedder {
-        fn embed(&self, _: &str) -> Vec<f32> {
+        fn embed(&self, _: &str) -> Result<Vec<f32>, nutcracker_agent::embedder::EmbedError> {
             unreachable!("must not be called")
+        }
+        fn id(&self) -> String {
+            "test-no-embedder".into()
         }
     }
     let mut t: MemoryTools<LocalProvider, NoEmbedder> = MemoryTools::new(
