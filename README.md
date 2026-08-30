@@ -79,14 +79,22 @@ cone rather than filling the sphere. Re-running the same index against corpora w
 | ↳ 0.6, mean-centred first | 27% | 4% | 0.00 |
 | ↳ 0.8, mean-centred first | 28% | 3% | -0.00 |
 
-Read the false-candidate column. On a realistically anisotropic corpus it is **26%, not 3%** — an
-order of magnitude more than published, and that column is the leakage: every false candidate is an
-item the provider is asked for and learns was a candidate. At 0.8 the index degenerates entirely and
-every item matches every query, which reads as 100% recall and is the scheme telling you nothing.
+On a realistically anisotropic corpus the false-candidate rate is **26%, not 3%**. At 0.8 the index
+degenerates entirely and every item matches every query, which reads as 100% recall and is the scheme
+telling you nothing.
 
-**Mean-centring fixes it, and restores the uniform-sphere baseline exactly** (27–28% recall against
-28%, 3–4% false against 2%). It is not free: the mean must be computed client-side, and it must stay
-**fixed for the lifetime of a namespace**, because changing it makes every token computed afterwards
+> **A correction, because an earlier version of this section got it backwards.** It called the
+> false-candidate column "the leakage". It is not. A false candidate is **bandwidth**: the client
+> fetches an item, decrypts it, ranks it and discards it, and the provider learns nothing it did not
+> already know from the bucket token. The per-item disclosure is **`bits/item` = bands × bits**, and
+> the two move in opposite directions. If anything a *higher* false rate helps query privacy, because
+> it is cover: the provider cannot tell which of the returned candidates you actually wanted. The
+> original `leakage.rs` said this correctly and I overrode it. Read `bits/item` for disclosure and
+> the false rate for cost.
+
+**Mean-centring restores the uniform-sphere baseline exactly** (27–28% recall against 28%, 3–4%
+false against 2%). It is not free: the mean must be computed client-side, and it must stay **fixed
+for the lifetime of a namespace**, because changing it makes every token computed afterwards
 disagree with every token computed before. That is a migration, not a knob. Not yet implemented.
 
 ### Measured against a real model (2026-08-30)
@@ -117,6 +125,33 @@ Mean-centring cuts disclosure hard (22% → 3%) and costs recall (46% → 17%). 
 synthetic run predicted, and the reason is instructive: on real embeddings part of the topical signal
 genuinely lives along the shared direction, so removing it removes some of the thing you were
 searching for. On a 48-sentence corpus the mean is also a poor estimate of itself.
+
+### Centring, on the evidence rather than on theory
+
+A sweep of 14 parameter settings, with and without centring, on the real corpus. A configuration is
+**dominated** when another beats it on recall *and* on cost at once; what survives is the frontier.
+**11 of 16 frontier points are centred, and 8 as-is configurations are beaten outright.** Centring
+moves the frontier; it does not merely slide along it.
+
+The comparison that decides it, once `bits/item` is read as the disclosure it is:
+
+| | recall | candidates | **bits/item** |
+|---|---|---|---|
+| as-is 8 × 8 *(today's default)* | 46% | 22% | **64** |
+| **centred 8 × 4** | **67%** | 36% | **32** |
+| centred 24 × 8 | 42% | 9% | 192 |
+
+**`centred 8 × 4` is the recommendation.** Half the per-item disclosure of the current default, and
+half again more recall. It pays in bandwidth — 36% of candidates come back unrelated rather than 22%
+— which is the cheap axis, and which buys query cover rather than spending it.
+
+Note the third row as the trap it is. Chasing a low candidate rate (9%) is what an earlier reading of
+this table would have recommended, and it triples per-item disclosure to 192 bits to buy *less*
+recall than the default. That is paying on the expensive axis to optimise the cheap one.
+
+Implementing it is a migration, not a config change, for the reason above: the mean must be fixed for
+a namespace's lifetime. It should be recorded and checked exactly the way the embedder identity now
+is, and for exactly the same reason.
 
 One implementation note the measurement forced out: `shared_bands` re-derives every hyperplane
 component by hashing `(plane, dimension)`, so comparing per pair is `pairs × planes × dims` hashes.

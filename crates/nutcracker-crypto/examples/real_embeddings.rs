@@ -133,7 +133,25 @@ fn main() {
         "bands", "bits", "recall", "false", "mean cos(unrel)", "corpus"
     );
 
-    for (bands, bits) in [(8usize, 8usize), (16, 8), (8, 4), (16, 4)] {
+    // A sweep rather than four points, because the question is whether centring **moves the
+    // recall/leakage frontier** or merely slides along it. Four points cannot answer that: two
+    // configurations are only comparable when one beats the other on both axes at once.
+    for (bands, bits) in [
+        (4usize, 8usize),
+        (8, 8),
+        (12, 8),
+        (16, 8),
+        (24, 8),
+        (32, 8),
+        (4, 6),
+        (8, 6),
+        (16, 6),
+        (32, 6),
+        (4, 4),
+        (8, 4),
+        (16, 4),
+        (32, 4),
+    ] {
         let idx = BlindIndex::new(
             &ns,
             IndexParams {
@@ -151,6 +169,89 @@ fn main() {
     }
 
     println!();
-    println!("`recall` is a same-topic pair being retrieved; `false` is a different-topic pair");
-    println!("coming back as a candidate, which is what the provider gets to observe.");
+    println!("`recall` is a same-topic pair being retrieved. `false` is a different-topic pair");
+    println!("coming back as a candidate, and it is **bandwidth, not disclosure** - the client");
+    println!("decrypts and re-ranks, so an extra candidate costs a fetch and reveals nothing new.");
+    println!("If anything a higher false rate HELPS query privacy: it is cover, because the");
+    println!("provider cannot tell which candidate you actually wanted.");
+    println!();
+    println!("The per-item disclosure is `bits/item` = bands x bits, and it moves the other way.");
+
+    // The comparison that decides whether centring is worth a migration. A configuration is
+    // dominated when some other configuration beats it on recall AND on disclosure at once;
+    // anything not dominated sits on the frontier. If centred points dominate as-is points, the
+    // frontier moved and centring is a real improvement rather than another knob on the same
+    // trade-off.
+    let mut all: Vec<(String, usize, usize, f64, f64)> = Vec::new();
+    for (bands, bits) in [
+        (4usize, 8usize),
+        (8, 8),
+        (12, 8),
+        (16, 8),
+        (24, 8),
+        (32, 8),
+        (4, 6),
+        (8, 6),
+        (16, 6),
+        (32, 6),
+        (4, 4),
+        (8, 4),
+        (16, 4),
+        (32, 4),
+    ] {
+        let idx = BlindIndex::new(
+            &ns,
+            IndexParams {
+                bands,
+                band_bits: bits,
+            },
+        );
+        for (label, items) in [("as-is", &plain), ("centred", &centred)] {
+            let s = score(&idx, items);
+            all.push((label.to_string(), bands, bits, s.recall, s.false_rate));
+        }
+    }
+
+    let dominates = |a: &(String, usize, usize, f64, f64), b: &(String, usize, usize, f64, f64)| {
+        a.3 >= b.3 && a.4 <= b.4 && (a.3 > b.3 || a.4 < b.4)
+    };
+
+    println!();
+    println!("Frontier (nothing measured beats these on both axes at once):");
+    println!(
+        "{:>10} {:>6} {:>6} {:>9} {:>9} {:>11}",
+        "corpus", "bands", "bits", "recall", "false", "bits/item"
+    );
+    let mut frontier: Vec<_> = all
+        .iter()
+        .filter(|p| !all.iter().any(|q| dominates(q, p)))
+        .collect();
+    frontier.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap());
+    for p in &frontier {
+        println!(
+            "{:>10} {:>6} {:>6} {:>8.0}% {:>8.0}% {:>11}",
+            p.0,
+            p.1,
+            p.2,
+            p.3,
+            p.4,
+            p.1 * p.2
+        );
+    }
+
+    let centred_on_frontier = frontier.iter().filter(|p| p.0 == "centred").count();
+    println!();
+    println!(
+        "{} of {} frontier points are centred.",
+        centred_on_frontier,
+        frontier.len()
+    );
+    let dominated_as_is = all
+        .iter()
+        .filter(|p| p.0 == "as-is" && all.iter().any(|q| q.0 == "centred" && dominates(q, p)))
+        .count();
+    println!(
+        "{} as-is configurations are beaten outright by some centred one.",
+        dominated_as_is
+    );
 }
