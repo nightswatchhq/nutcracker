@@ -66,14 +66,35 @@ pub struct IndexParams {
 }
 
 impl Default for IndexParams {
-    /// A deliberately conservative default: 8 bands of 8 bits. Each band partitions the namespace
-    /// into 256 buckets, so a band reveals about 8 bits about an item. Recall is decent for
-    /// near-duplicates and mediocre for loose semantic matches, which is the correct direction for
-    /// a default in a product whose headline claim is privacy.
+    /// 8 bands of 4 bits, chosen on measurement rather than on instinct.
+    ///
+    /// This was 8x8, on the reasoning that fewer buckets means less disclosure and that is the
+    /// right direction for a privacy product. Two things were wrong with that.
+    ///
+    /// **The disclosure is `bands x band_bits`**, which 8x4 halves to 32 bits per item. The other
+    /// number, how many unrelated items come back as candidates, is *bandwidth*: the client
+    /// decrypts and re-ranks, so an extra candidate costs a fetch and tells the provider nothing
+    /// the bucket token had not. If anything it is cover. Optimising it was optimising the cheap
+    /// axis by spending the expensive one.
+    ///
+    /// **And it interacts with centring.** Since `nutcracker-agent` subtracts the model's shared
+    /// direction before hashing, the hyperplanes are no longer half-wasted on a component every
+    /// vector has, and a coarser band is enough. Measured on real `nomic-embed-text` embeddings,
+    /// 48 sentences over 12 topics (`nutcracker-crypto/examples/real_embeddings.rs`):
+    ///
+    /// | | recall | candidates | bits/item |
+    /// |---|---|---|---|
+    /// | as-is 8x8 (the old default) | 46% | 22% | 64 |
+    /// | centred 8x8 | **17%** | 3% | 64 |
+    /// | centred 8x4 | **67%** | 36% | 32 |
+    ///
+    /// Read the middle row. Shipping centring while leaving this at 8x8 gave 17% recall - worse
+    /// than doing neither - and that is exactly what shipped for an hour before this changed. The
+    /// two are one decision and were briefly treated as two.
     fn default() -> Self {
         Self {
             bands: 8,
-            band_bits: 8,
+            band_bits: 4,
         }
     }
 }
@@ -191,6 +212,24 @@ mod tests {
     /// A near-duplicate is a small perturbation of the original.
     fn perturb(rng: &mut StdRng, v: &[f32], scale: f32) -> Vec<f32> {
         v.iter().map(|x| x + rng.gen_range(-scale..scale)).collect()
+    }
+
+    /// Pinned to the measurement, not to taste.
+    ///
+    /// The default was 8x8 on the instinct that fewer buckets is more private. It is not: the
+    /// disclosure is `bands x band_bits`, and with centring in front of it 8x8 collapses recall to
+    /// 17% while 8x4 gives 67% at *half* the per-item disclosure. If someone changes this back,
+    /// they should have a newer measurement than `examples/real_embeddings.rs`, and this test is
+    /// where they say so.
+    #[test]
+    fn the_default_is_the_configuration_that_was_measured_best() {
+        let p = IndexParams::default();
+        assert_eq!((p.bands, p.band_bits), (8, 4));
+        assert_eq!(
+            p.hyperplanes(),
+            32,
+            "per-item disclosure is bands x band_bits"
+        );
     }
 
     #[test]

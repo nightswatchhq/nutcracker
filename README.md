@@ -141,9 +141,15 @@ The comparison that decides it, once `bits/item` is read as the disclosure it is
 | **centred 8 × 4** | **67%** | 36% | **32** |
 | centred 24 × 8 | 42% | 9% | 192 |
 
-**`centred 8 × 4` is the recommendation.** Half the per-item disclosure of the current default, and
-half again more recall. It pays in bandwidth — 36% of candidates come back unrelated rather than 22%
-— which is the cheap axis, and which buys query cover rather than spending it.
+**`centred 8 × 4` is now the default.** Half the per-item disclosure of the old one, and half again
+more recall. It pays in bandwidth — 36% of candidates come back unrelated rather than 22% — which is
+the cheap axis, and which buys query cover rather than spending it.
+
+> **It shipped wrong first, and the failure is worth naming.** Centring went in while the default was
+> still 8 × 8, and centred 8 × 8 gives **17%** recall — worse than doing neither. For about an hour
+> the released configuration was worse than the one it replaced, because two halves of one decision
+> were shipped as two decisions. The manifest catches the upgrade rather than corrupting anyone's
+> index, which is the only reason this is an inconvenience rather than an incident.
 
 Note the third row as the trap it is. Chasing a low candidate rate (9%) is what an earlier reading of
 this table would have recommended, and it triples per-item disclosure to 192 bits to buy *less*
