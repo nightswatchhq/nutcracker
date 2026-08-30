@@ -115,6 +115,28 @@ fn main() {
         })
         .collect();
 
+    // The question that decides whether centring needs a migration at all: is the mean a property
+    // of the corpus, or of the model? Corpus B is disjoint from A - different topics, different
+    // register, no overlap - so centring B by *A's* mean is the test. If it works, the mean ships
+    // as a per-model constant, an index is stable from its first item, and a growing corpus never
+    // invalidates its own tokens.
+    let raw_b = include_str!("emb-b.json");
+    let corpus_b: Corpus = serde_json::from_str(raw_b).expect("corpus B must parse");
+    let plain_b: Vec<(String, Vec<f32>)> = corpus_b
+        .items
+        .iter()
+        .map(|i| (i.topic.clone(), unit(i.v.clone())))
+        .collect();
+    let cross: Vec<(String, Vec<f32>)> = plain_b
+        .iter()
+        .map(|(t, v)| {
+            (
+                t.clone(),
+                unit(v.iter().zip(&mean).map(|(x, m)| x - m).collect()),
+            )
+        })
+        .collect();
+
     let ns = RootKey::from_bytes([3u8; 32]).namespace_key("notes", 0);
     println!(
         "{} , {} dims, {} sentences over {} topics",
@@ -164,6 +186,29 @@ fn main() {
             println!(
                 "{bands:>6} {bits:>6} {:>9.0}% {:>9.0}% {:>18.2} {:>12}",
                 s.recall, s.false_rate, s.unrelated_cos, label
+            );
+        }
+    }
+
+    println!();
+    println!("Corpus B (disjoint topics), centred by corpus A's mean - does the mean generalise?");
+    println!(
+        "{:>6} {:>6} {:>10} {:>10} {:>18} {:>14}",
+        "bands", "bits", "recall", "false", "mean cos(unrel)", "corpus"
+    );
+    for (bands, bits) in [(8usize, 8usize), (8, 4), (16, 4)] {
+        let idx = BlindIndex::new(
+            &ns,
+            IndexParams {
+                bands,
+                band_bits: bits,
+            },
+        );
+        for (label, items) in [("B as-is", &plain_b), ("B by A's mean", &cross)] {
+            let sc = score(&idx, items);
+            println!(
+                "{bands:>6} {bits:>6} {:>9.0}% {:>9.0}% {:>18.2} {:>14}",
+                sc.recall, sc.false_rate, sc.unrelated_cos, label
             );
         }
     }

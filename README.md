@@ -149,9 +149,28 @@ Note the third row as the trap it is. Chasing a low candidate rate (9%) is what 
 this table would have recommended, and it triples per-item disclosure to 192 bits to buy *less*
 recall than the default. That is paying on the expensive axis to optimise the cheap one.
 
-Implementing it is a migration, not a config change, for the reason above: the mean must be fixed for
-a namespace's lifetime. It should be recorded and checked exactly the way the embedder identity now
-is, and for exactly the same reason.
+### It turned out not to need a migration, because the mean belongs to the model
+
+Twice above this document called centring a migration, on the assumption that the mean is a property
+of a corpus and must be computed and frozen per namespace. **That was assumed rather than tested,
+and it is wrong.**
+
+Two disjoint corpora, 48 sentences each, different topics and different register with no overlap:
+their means point in nearly the same direction, `cos = 0.939`. Centring corpus B by corpus **A's**
+mean takes B's unrelated-pair cosine from 0.420 to 0.048 — essentially as well as its own mean does
+(-0.045). Through the index, on that held-out corpus at 8 × 4: 88% recall and 70% candidates becomes
+**81% and 45%**, against the current default's 47% / 21% at twice the per-item disclosure.
+
+So the mean ships as a **per-model constant** (`reference_mean.rs`, estimated from 96 sentences over
+24 topics). An index is stable from its first item and a growing corpus never invalidates its own
+tokens. For scale: the mean of 96 unit vectors drawn uniformly on a 768-sphere would have norm
+~0.10; this one has norm **0.659**, and that number is the cone.
+
+`nutcracker-mcp` applies it now. Revising the constant *would* be a migration, so it is versioned
+into the embedder identity as `+centred-v1` and the manifest check refuses a mismatch — no second
+mechanism to keep in step. The same manifest now records `bands x band_bits`, because a token is
+that many hyperplane signs and changing the shape breaks them exactly as changing the model does:
+guarding one and not the other would have left the same trapdoor open with a different label.
 
 One implementation note the measurement forced out: `shared_bands` re-derives every hyperplane
 component by hashing `(plane, dimension)`, so comparing per pair is `pairs × planes × dims` hashes.

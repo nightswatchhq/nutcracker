@@ -113,7 +113,12 @@ fn main() -> anyhow::Result<()> {
 
     // Refuses rather than warns. See `embedder.rs`: a changed model means a disjoint token space,
     // so old memories become unfindable and new ones look fine, with nothing to see in a log.
-    check_or_record(&manifest_path_for(&args.key), embedder.as_ref())?;
+    let params = nutcracker_crypto::IndexParams::default();
+    check_or_record(
+        &manifest_path_for(&args.key),
+        embedder.as_ref(),
+        &format!("{}x{}", params.bands, params.band_bits),
+    )?;
 
     // Fail at startup rather than at the agent's first search, where the error arrives as a broken
     // tool call in the middle of somebody's conversation.

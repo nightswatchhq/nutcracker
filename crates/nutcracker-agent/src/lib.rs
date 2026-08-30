@@ -31,6 +31,7 @@
 
 pub mod embedder;
 pub mod http;
+pub mod reference_mean;
 pub mod tools;
 pub mod transport;
 
